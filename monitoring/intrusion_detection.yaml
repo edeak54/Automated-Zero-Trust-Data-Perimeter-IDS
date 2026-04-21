@@ -1,0 +1,112 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Zero-Trust Archive: Custom S3 Intrusion Detection System'
+
+Parameters:
+  AlertEmail:
+    Type: String
+    Description: 'The email address where you want to receive security alerts'
+  TargetBucketName:
+    Type: String
+    Description: 'The name of the S3 bucket you created previously'
+
+Resources:
+  # Alert Topic
+  SecurityAlertTopic:
+    Type: 'AWS::SNS::Topic'
+    Properties:
+      TopicName: 'ZeroTrust-S3-Alerts'
+
+  # Email Subscription
+  EmailSubscription:
+    Type: 'AWS::SNS::Subscription'
+    Properties:
+      Endpoint: !Ref AlertEmail
+      Protocol: email
+      TopicArn: !Ref SecurityAlertTopic
+
+  # The Custom Detection Rule
+  S3UnauthorizedAccessRule:
+    Type: 'AWS::Events::Rule'
+    Properties:
+      Description: 'Alerts when S3 access is denied for our specific bucket'
+      EventPattern:
+        source:
+          - aws.s3
+        detail-type:
+          - 'AWS API Call via CloudTrail'
+        detail:
+          errorCode:
+            - 'AccessDenied'
+          requestParameters:
+            bucketName:
+              - !Ref TargetBucketName
+      State: ENABLED
+      Targets:
+        - Arn: !Ref SecurityAlertTopic
+          Id: 'S3AlertTarget'
+
+  # Permission for EventBridge to send emails via SNS
+  SnsTopicPolicy:
+    Type: 'AWS::SNS::TopicPolicy'
+    Properties:
+      Topics: [!Ref SecurityAlertTopic]
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: 'sns:Publish'
+            Resource: !Ref SecurityAlertTopic
+
+  # Separate bucket to store the CloudTrail logs
+  CloudTrailLogBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub '${TargetBucketName}-trail-logs'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # Policy to allow CloudTrail to write to the log bucket
+  CloudTrailLogBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref CloudTrailLogBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AWSCloudTrailAclCheck
+            Effect: Allow
+            Principal: { Service: cloudtrail.amazonaws.com }
+            Action: 's3:GetBucketAcl'
+            Resource: !Sub 'arn:aws:s3:::${CloudTrailLogBucket}'
+          - Sid: AWSCloudTrailWrite
+            Effect: Allow
+            Principal: { Service: cloudtrail.amazonaws.com }
+            Action: 's3:PutObject'
+            Resource: !Sub 'arn:aws:s3:::${CloudTrailLogBucket}/AWSLogs/${AWS::AccountId}/*'
+            Condition:
+              StringEquals:
+                's3:x-amz-acl': 'bucket-owner-full-control'
+
+  # The Trail that watches S3 Data Events
+  S3DataTrail:
+    Type: 'AWS::CloudTrail::Trail'
+    DependsOn: CloudTrailLogBucketPolicy
+    Properties:
+      TrailName: !Sub '${TargetBucketName}-data-trail'
+      S3BucketName: !Ref CloudTrailLogBucket
+      IsLogging: true
+      IncludeGlobalServiceEvents: false
+      EventSelectors:
+        - DataResources:
+            - Type: 'AWS::S3::Object'
+              Values:
+                - !Sub 'arn:aws:s3:::${TargetBucketName}/'
+          ReadWriteType: All
+
+Outputs:
+  SnsTopicArn:
+    Value: !Ref SecurityAlertTopic

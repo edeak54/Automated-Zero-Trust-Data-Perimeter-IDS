@@ -1,0 +1,61 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Zero-Trust Media Archive: S3 Bucket with VPC Endpoint Lockdown'
+
+Parameters:
+  VPCEndpointId:
+    Type: String
+    Description: 'vpcexxx (from the network cloudformation stack)' # id of endpoint from network stack
+  
+  BucketName:
+    Type: String
+    Default: 'zero-trust-archive-unique-id-2026'
+    Description: 'Must be globally unique'
+
+Resources:
+  # Logging Bucket
+  AccessLogsBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Sub '${BucketName}-logs'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # 2. Main Bucket
+  DataBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: !Ref BucketName
+      LoggingConfiguration:
+        DestinationBucketName: !Ref AccessLogsBucket
+        LogFilePrefix: 'access-logs/'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # 3. The Zero-Trust Bucket Policy
+  BucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref DataBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: 'DenyAllOutsideVPC'
+            Effect: Deny
+            Principal: '*'
+            Action: 's3:*'
+            Resource: 
+              - !Sub 'arn:aws:s3:::${DataBucket}'
+              - !Sub 'arn:aws:s3:::${DataBucket}/*'
+            Condition:
+              StringNotEquals:
+                'aws:SourceVpce': !Ref VPCEndpointId
