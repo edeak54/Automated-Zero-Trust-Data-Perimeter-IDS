@@ -49,12 +49,12 @@ To test the perimeter, I attempted to list the bucket contents via **AWS CloudSh
 
 > **Command:** `aws s3 ls s3://my-secure-archive-bucket`
 
-![Screenshot of Access Denied in CloudShell](images/cloudshell-deny.png)
+![Screenshot of Access Denied in CloudShell](images/cloudshell_deny.png)
 
 ### **2. Automated Intrusion Alert**
 Within minutes of the failed attempt, the **EventBridge Rule** detected the `AccessDenied` error in the CloudTrail logs and triggered an SNS notification to my email.
 
-![Screenshot of Security Alert Email](images/email-alert.png)
+![Screenshot of Security Alert Email](images/email_alert.png)
 
 ### **3. Stack Infrastructure**
 The entire environment is managed via Infrastructure as Code (IaC) for 100% reproducibility.
